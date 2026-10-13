@@ -22,14 +22,21 @@ function parseMaximumResolution(value: string | undefined): {width: number; heig
 	if (!match) throw new Error('FLUXER_ATTACHMENT_IMAGE_MAX_RESOLUTION must use WIDTHxHEIGHT, for example 1920x1080');
 	const width = Number(match[1]);
 	const height = Number(match[2]);
-	if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1 ||
-		width > 32768 || height > 32768 || width * height > 268_402_689) {
+	if (
+		!Number.isSafeInteger(width) ||
+		!Number.isSafeInteger(height) ||
+		width < 1 ||
+		height < 1 ||
+		width > 32768 ||
+		height > 32768 ||
+		width * height > 268_402_689
+	) {
 		throw new Error('FLUXER_ATTACHMENT_IMAGE_MAX_RESOLUTION dimensions are outside the supported range');
 	}
 	return {width, height};
 }
 
-export function resolveAttachmentWebpQuality(value: string | undefined = process.env.FLUXER_ATTACHMENT_WEBP_QUALITY): number {
+export function resolveAttachmentWebpQuality(value?: string): number {
 	if (value === undefined) return 85;
 	const normalized = value.trim();
 	if (!/^[0-9]+$/u.test(normalized)) {
@@ -42,13 +49,19 @@ export function resolveAttachmentWebpQuality(value: string | undefined = process
 	return quality;
 }
 
-export function resolveAttachmentWebpSettings(
-	env: NodeJS.ProcessEnv = process.env,
-): AttachmentWebpSettings {
+export function resolveAttachmentWebpSettings(env: NodeJS.ProcessEnv = process.env): AttachmentWebpSettings {
 	const resolution = parseMaximumResolution(env.FLUXER_ATTACHMENT_IMAGE_MAX_RESOLUTION);
 	return {
-		convertToWebp: parseBoolean(env.FLUXER_ATTACHMENT_WEBP_CONVERSION_ENABLED, true, 'FLUXER_ATTACHMENT_WEBP_CONVERSION_ENABLED'),
-		scaleImages: parseBoolean(env.FLUXER_ATTACHMENT_IMAGE_SCALING_ENABLED, true, 'FLUXER_ATTACHMENT_IMAGE_SCALING_ENABLED'),
+		convertToWebp: parseBoolean(
+			env.FLUXER_ATTACHMENT_WEBP_CONVERSION_ENABLED,
+			true,
+			'FLUXER_ATTACHMENT_WEBP_CONVERSION_ENABLED',
+		),
+		scaleImages: parseBoolean(
+			env.FLUXER_ATTACHMENT_IMAGE_SCALING_ENABLED,
+			true,
+			'FLUXER_ATTACHMENT_IMAGE_SCALING_ENABLED',
+		),
 		maxWidth: resolution.width,
 		maxHeight: resolution.height,
 		quality: resolveAttachmentWebpQuality(env.FLUXER_ATTACHMENT_WEBP_QUALITY),
@@ -59,16 +72,30 @@ export function getScaledImageOutputFormat(format: string | undefined): {
 	extension: string;
 	contentType: string;
 } {
-	switch (format) {
-		case 'jpeg': return {extension: 'jpg', contentType: 'image/jpeg'};
-		case 'png': return {extension: 'png', contentType: 'image/png'};
-		case 'gif': return {extension: 'gif', contentType: 'image/gif'};
-		case 'webp': return {extension: 'webp', contentType: 'image/webp'};
+	const normalized = format
+		?.split(';', 1)[0]
+		?.trim()
+		.toLowerCase()
+		.replace(/^image\//u, '');
+	switch (normalized) {
+		case 'jpg':
+		case 'jpeg':
+			return {extension: 'jpg', contentType: 'image/jpeg'};
+		case 'png':
+			return {extension: 'png', contentType: 'image/png'};
+		case 'gif':
+			return {extension: 'gif', contentType: 'image/gif'};
+		case 'webp':
+			return {extension: 'webp', contentType: 'image/webp'};
 		case 'tif':
-		case 'tiff': return {extension: 'tiff', contentType: 'image/tiff'};
+		case 'x-tiff':
+		case 'tiff':
+			return {extension: 'tiff', contentType: 'image/tiff'};
 		case 'avif':
 		case 'heic':
-		case 'heif': return {extension: 'avif', contentType: 'image/avif'};
-		default: return {extension: 'png', contentType: 'image/png'};
+		case 'heif':
+			return {extension: 'avif', contentType: 'image/avif'};
+		default:
+			return {extension: 'png', contentType: 'image/png'};
 	}
 }

@@ -38,6 +38,7 @@ export interface ProcessedAttachmentImage {
 }
 
 export interface ProcessAttachmentImageOptions {
+	sourceContentType?: string;
 	convertToWebp: boolean;
 	scaleImages: boolean;
 	maxWidth: number;
@@ -58,7 +59,16 @@ export async function processAttachmentImage(
 		} catch {
 			// Use system libvips for formats absent from Sharp's bundled decoders.
 			const decodeArgs = options.scaleImages
-				? ['thumbnail', inputPath, decodedPath, String(options.maxWidth), '--height', String(options.maxHeight), '--size', 'down']
+				? [
+						'thumbnail',
+						inputPath,
+						decodedPath,
+						String(options.maxWidth),
+						'--height',
+						String(options.maxHeight),
+						'--size',
+						'down',
+					]
 				: ['copy', inputPath, decodedPath];
 			await execFilePromise('vips', decodeArgs, {timeout: 120_000});
 			return await encodeAttachmentImage(decodedPath, outputPath, options, true);
@@ -68,18 +78,29 @@ export async function processAttachmentImage(
 	}
 }
 
-function outputForFormat(image: sharp.Sharp, format: string | undefined, options: ProcessAttachmentImageOptions): sharp.Sharp {
+function outputForFormat(
+	image: sharp.Sharp,
+	format: string | undefined,
+	options: ProcessAttachmentImageOptions,
+): sharp.Sharp {
 	if (options.convertToWebp) {
 		return image.webp({quality: options.quality, effort: 4, lossless: false});
 	}
 	switch (format) {
-		case 'jpeg': return image.jpeg({quality: 90, mozjpeg: true});
-		case 'gif': return image.gif({effort: 4});
-		case 'webp': return image.webp({quality: options.quality, effort: 4, lossless: false});
-		case 'tiff': return image.tiff();
+		case 'jpg':
+		case 'jpeg':
+			return image.jpeg({quality: 90, mozjpeg: true});
+		case 'gif':
+			return image.gif({effort: 4});
+		case 'webp':
+			return image.webp({quality: options.quality, effort: 4, lossless: false});
+		case 'tiff':
+			return image.tiff();
 		case 'avif':
-		case 'heif': return image.avif({quality: 65, effort: 4});
-		default: return image.png();
+		case 'heif':
+			return image.avif({quality: 65, effort: 4});
+		default:
+			return image.png();
 	}
 }
 
@@ -100,12 +121,10 @@ async function encodeAttachmentImage(
 			withoutEnlargement: true,
 		});
 	}
-	const result = await outputForFormat(image, metadata.format, options).toFile(outputPath);
 	const output = options.convertToWebp
 		? {extension: 'webp', contentType: 'image/webp'}
-		: alreadyScaled
-			? {extension: 'png', contentType: 'image/png'}
-			: getScaledImageOutputFormat(metadata.format);
+		: getScaledImageOutputFormat(options.sourceContentType ?? metadata.format);
+	const result = await outputForFormat(image, output.extension, options).toFile(outputPath);
 	const width = result.width;
 	const height = result.pageHeight ?? result.height;
 	return {

@@ -218,11 +218,19 @@ export class AttachmentProcessingService {
 		const attachmentId = createAttachmentID(await this.snowflakeService.generate());
 		let contentType = pendingUpload.content_type ?? getContentTypeFromFilename(attachment.filename);
 		const imageSettings = resolveAttachmentWebpSettings();
-		let convertImageToWebp = imageSettings.convertToWebp && isSupportedMediaContentType(contentType) && contentType.toLowerCase().startsWith('image/');
-		let scaleImage = imageSettings.scaleImages && isSupportedMediaContentType(contentType) && contentType.toLowerCase().startsWith('image/');
-		let storedFilename = convertImageToWebp ? replaceFilenameExtension(attachment.filename, 'webp') : attachment.filename;
+		let convertImageToWebp =
+			imageSettings.convertToWebp &&
+			isSupportedMediaContentType(contentType) &&
+			contentType.toLowerCase().startsWith('image/');
+		let scaleImage =
+			imageSettings.scaleImages &&
+			isSupportedMediaContentType(contentType) &&
+			contentType.toLowerCase().startsWith('image/');
+		let storedFilename = convertImageToWebp
+			? replaceFilenameExtension(attachment.filename, 'webp')
+			: attachment.filename;
 		if (scaleImage && !convertImageToWebp) {
-			const scaledFormat = getScaledImageOutputFormat(contentType.slice('image/'.length).replace('jpg', 'jpeg'));
+			const scaledFormat = getScaledImageOutputFormat(contentType);
 			storedFilename = replaceFilenameExtension(attachment.filename, scaledFormat.extension);
 		}
 		let cdnKey = makeAttachmentCdnKey(message.channelId, attachmentId, storedFilename);
@@ -291,13 +299,14 @@ export class AttachmentProcessingService {
 					flags |= MessageAttachmentFlags.CONTAINS_EXPLICIT_MEDIA;
 				}
 				nsfw = metadata.nsfw;
-				const isImageContent = isSupportedMediaContentType(contentType) && contentType.toLowerCase().startsWith('image/');
+				const isImageContent =
+					isSupportedMediaContentType(contentType) && contentType.toLowerCase().startsWith('image/');
 				convertImageToWebp = imageSettings.convertToWebp && isImageContent;
 				scaleImage = imageSettings.scaleImages && isImageContent;
 				storedFilename = convertImageToWebp
 					? replaceFilenameExtension(attachment.filename, 'webp')
 					: scaleImage
-						? replaceFilenameExtension(attachment.filename, getScaledImageOutputFormat(contentType.slice('image/'.length).replace('jpg', 'jpeg')).extension)
+						? replaceFilenameExtension(attachment.filename, getScaledImageOutputFormat(contentType).extension)
 						: attachment.filename;
 				cdnKey = makeAttachmentCdnKey(message.channelId, attachmentId, storedFilename);
 			}

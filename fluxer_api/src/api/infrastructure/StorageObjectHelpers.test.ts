@@ -8,7 +8,7 @@ import {
 import fs from 'node:fs/promises';
 import sharp from 'sharp';
 import {temporaryFile} from 'tempy';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -168,7 +168,9 @@ describe('attachment WebP edge cases', () => {
 		const inputPath = temporaryFile({extension: 'png'});
 		const outputPath = temporaryFile({extension: 'webp'});
 		try {
-			await sharp({create: {width: 1200, height: 2400, channels: 4, background: {r: 10, g: 20, b: 30, alpha: 0.5}}}).png().toFile(inputPath);
+			await sharp({create: {width: 1200, height: 2400, channels: 4, background: {r: 10, g: 20, b: 30, alpha: 0.5}}})
+				.png()
+				.toFile(inputPath);
 			const result = await processAttachmentImageToWebp(inputPath, outputPath);
 			const metadata = await sharp(outputPath).metadata();
 			expect([result.width, result.height]).toEqual([540, 1080]);
@@ -182,12 +184,15 @@ describe('attachment WebP edge cases', () => {
 		const inputPath = temporaryFile({extension: 'gif'});
 		const outputPath = temporaryFile({extension: 'webp'});
 		try {
-			const width = 1200, height = 1200, pages = 2;
+			const width = 1200,
+				height = 1200,
+				pages = 2;
 			const pixels = Buffer.alloc(width * height * pages * 3);
 			pixels.fill(200, 0, width * height * 3);
 			pixels.fill(40, width * height * 3);
 			await sharp(pixels, {raw: {width, height: height * pages, channels: 3, pageHeight: height}})
-				.gif({loop: 3, delay: [100, 200]}).toFile(inputPath);
+				.gif({loop: 3, delay: [100, 200]})
+				.toFile(inputPath);
 			const result = await processAttachmentImageToWebp(inputPath, outputPath);
 			const metadata = await sharp(outputPath, {animated: true}).metadata();
 			expect(metadata.pages).toBe(2);
@@ -205,7 +210,9 @@ describe('attachment WebP edge cases', () => {
 		const outputPath = temporaryFile({extension: 'webp'});
 		try {
 			await sharp({create: {width: 2400, height: 1200, channels: 3, background: '#336699'}})
-				.withMetadata({orientation: 6}).jpeg().toFile(inputPath);
+				.withMetadata({orientation: 6})
+				.jpeg()
+				.toFile(inputPath);
 			const result = await processAttachmentImageToWebp(inputPath, outputPath);
 			expect([result.width, result.height]).toEqual([540, 1080]);
 			expect((await sharp(outputPath).metadata()).orientation).toBeUndefined();
@@ -219,8 +226,9 @@ describe('attachment image decoder fallback', () => {
 	it('converts BMP uploads using system libvips when bundled Sharp cannot read them', async () => {
 		const inputPath = temporaryFile({extension: 'bmp'});
 		const outputPath = temporaryFile({extension: 'webp'});
-		const width = 2400, height = 1200;
-		const rowSize = Math.ceil(width * 3 / 4) * 4;
+		const width = 2400,
+			height = 1200;
+		const rowSize = Math.ceil((width * 3) / 4) * 4;
 		const bmp = Buffer.alloc(54 + rowSize * height, 100);
 		bmp.fill(0, 0, 54);
 		bmp.write('BM');
@@ -244,13 +252,47 @@ describe('attachment image decoder fallback', () => {
 });
 
 describe('independent attachment image scaling', () => {
+	it('keeps the declared output format after using the system decoder fallback', async () => {
+		const inputPath = temporaryFile({extension: 'tiff'});
+		const outputPath = temporaryFile({extension: 'tiff'});
+		try {
+			await sharp({create: {width: 240, height: 120, channels: 3, background: '#336699'}})
+				.tiff()
+				.toFile(inputPath);
+			const metadataSpy = vi.spyOn(sharp.prototype, 'metadata').mockRejectedValueOnce(new Error('Unsupported decoder'));
+			try {
+				const processed = await processAttachmentImage(inputPath, outputPath, {
+					sourceContentType: 'image/tiff',
+					convertToWebp: false,
+					scaleImages: true,
+					maxWidth: 128,
+					maxHeight: 72,
+					quality: 85,
+				});
+				expect(processed.contentType).toBe('image/tiff');
+				expect([processed.width, processed.height]).toEqual([128, 64]);
+				expect((await sharp(outputPath).metadata()).format).toBe('tiff');
+			} finally {
+				metadataSpy.mockRestore();
+			}
+		} finally {
+			await Promise.all([fs.unlink(inputPath).catch(() => undefined), fs.unlink(outputPath).catch(() => undefined)]);
+		}
+	});
+
 	it('resizes a PNG while keeping its format when WebP conversion is disabled', async () => {
 		const inputPath = temporaryFile({extension: 'png'});
 		const outputPath = temporaryFile({extension: 'png'});
 		try {
-			await sharp({create: {width: 2400, height: 1200, channels: 4, background: {r: 10, g: 20, b: 30, alpha: 0.5}}}).png().toFile(inputPath);
+			await sharp({create: {width: 2400, height: 1200, channels: 4, background: {r: 10, g: 20, b: 30, alpha: 0.5}}})
+				.png()
+				.toFile(inputPath);
 			const processed = await processAttachmentImage(inputPath, outputPath, {
-				convertToWebp: false, scaleImages: true, maxWidth: 1280, maxHeight: 720, quality: 85,
+				convertToWebp: false,
+				scaleImages: true,
+				maxWidth: 1280,
+				maxHeight: 720,
+				quality: 85,
 			});
 			const metadata = await sharp(outputPath).metadata();
 			expect(processed.contentType).toBe('image/png');
@@ -265,9 +307,15 @@ describe('independent attachment image scaling', () => {
 		const inputPath = temporaryFile({extension: 'png'});
 		const outputPath = temporaryFile({extension: 'webp'});
 		try {
-			await sharp({create: {width: 2400, height: 1200, channels: 3, background: '#336699'}}).png().toFile(inputPath);
+			await sharp({create: {width: 2400, height: 1200, channels: 3, background: '#336699'}})
+				.png()
+				.toFile(inputPath);
 			const processed = await processAttachmentImage(inputPath, outputPath, {
-				convertToWebp: true, scaleImages: false, maxWidth: 1920, maxHeight: 1080, quality: 85,
+				convertToWebp: true,
+				scaleImages: false,
+				maxWidth: 1920,
+				maxHeight: 1080,
+				quality: 85,
 			});
 			expect(processed.contentType).toBe('image/webp');
 			expect([processed.width, processed.height]).toEqual([2400, 1200]);

@@ -618,7 +618,12 @@ export class StorageService implements IStorageService {
 			}
 			if ((convertImagesToWebp || scaleImages) && contentType.toLowerCase().startsWith('image/')) {
 				const processed = await processAttachmentImage(downloadedSource, processedPath, {
-					convertToWebp: convertImagesToWebp, scaleImages, maxWidth, maxHeight, quality: webpQuality,
+					sourceContentType: contentType,
+					convertToWebp: convertImagesToWebp,
+					scaleImages,
+					maxWidth,
+					maxHeight,
+					quality: webpQuality,
 				});
 				await this.uploadObjectFromFile({
 					bucket: destinationBucket,
