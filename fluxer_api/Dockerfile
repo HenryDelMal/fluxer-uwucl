@@ -54,7 +54,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 		libheif1 \
 		libheif-plugin-libde265 \
 		libheif-plugin-dav1d \
-		libvips42t64 && \
+		libvips42t64 \
+		libvips-tools && \
 	rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g pnpm@11.27.0

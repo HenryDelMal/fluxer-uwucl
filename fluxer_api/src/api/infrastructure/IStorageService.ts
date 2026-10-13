@@ -92,6 +92,11 @@ export interface IStorageService {
 		destinationKey: string;
 		contentType: string;
 		sourceLocalPath?: string;
+		convertImagesToWebp?: boolean;
+		scaleImages?: boolean;
+		maxWidth?: number;
+		maxHeight?: number;
+		webpQuality?: number;
 	}): Promise<ProcessedStorageObjectMetadata | null>;
 	getPresignedDownloadURL(params: {
 		bucket: string;

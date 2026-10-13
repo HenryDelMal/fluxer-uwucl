@@ -5,6 +5,7 @@ import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import {promisify} from 'node:util';
 import {Logger} from '@app/api/Logger';
+import {getScaledImageOutputFormat, resolveAttachmentWebpSettings} from '@app/api/infrastructure/AttachmentWebpQuality';
 import {isJsonRecord, parseJsonArray} from '@app/api/utils/JsonBoundaryUtils';
 import sharp from 'sharp';
 import {temporaryFile} from 'tempy';
@@ -25,6 +26,104 @@ interface StrippedMediaBuffer {
 	contentType: string;
 	width?: number;
 	height?: number;
+}
+
+export interface ProcessedAttachmentImage {
+	filePath: string;
+	contentType: string;
+	contentHash: string;
+	contentLength: number;
+	width?: number;
+	height?: number;
+}
+
+export interface ProcessAttachmentImageOptions {
+	convertToWebp: boolean;
+	scaleImages: boolean;
+	maxWidth: number;
+	maxHeight: number;
+	quality: number;
+}
+
+/** Optionally scales an image and/or stores it as WebP. */
+export async function processAttachmentImage(
+	inputPath: string,
+	outputPath: string,
+	options: ProcessAttachmentImageOptions,
+): Promise<ProcessedAttachmentImage> {
+	const decodedPath = temporaryFile({extension: 'png'});
+	try {
+		try {
+			return await encodeAttachmentImage(inputPath, outputPath, options);
+		} catch {
+			// Use system libvips for formats absent from Sharp's bundled decoders.
+			const decodeArgs = options.scaleImages
+				? ['thumbnail', inputPath, decodedPath, String(options.maxWidth), '--height', String(options.maxHeight), '--size', 'down']
+				: ['copy', inputPath, decodedPath];
+			await execFilePromise('vips', decodeArgs, {timeout: 120_000});
+			return await encodeAttachmentImage(decodedPath, outputPath, options, true);
+		}
+	} finally {
+		await cleanupTempFiles([decodedPath]);
+	}
+}
+
+function outputForFormat(image: sharp.Sharp, format: string | undefined, options: ProcessAttachmentImageOptions): sharp.Sharp {
+	if (options.convertToWebp) {
+		return image.webp({quality: options.quality, effort: 4, lossless: false});
+	}
+	switch (format) {
+		case 'jpeg': return image.jpeg({quality: 90, mozjpeg: true});
+		case 'gif': return image.gif({effort: 4});
+		case 'webp': return image.webp({quality: options.quality, effort: 4, lossless: false});
+		case 'tiff': return image.tiff();
+		case 'avif':
+		case 'heif': return image.avif({quality: 65, effort: 4});
+		default: return image.png();
+	}
+}
+
+async function encodeAttachmentImage(
+	inputPath: string,
+	outputPath: string,
+	options: ProcessAttachmentImageOptions,
+	alreadyScaled = false,
+): Promise<ProcessedAttachmentImage> {
+	let image = sharp(inputPath, {animated: true, limitInputPixels: 268_402_689});
+	const metadata = await image.metadata();
+	image = image.rotate();
+	if (options.scaleImages && !alreadyScaled) {
+		image = image.resize({
+			width: options.maxWidth,
+			height: options.maxHeight,
+			fit: 'inside',
+			withoutEnlargement: true,
+		});
+	}
+	const result = await outputForFormat(image, metadata.format, options).toFile(outputPath);
+	const output = options.convertToWebp
+		? {extension: 'webp', contentType: 'image/webp'}
+		: alreadyScaled
+			? {extension: 'png', contentType: 'image/png'}
+			: getScaledImageOutputFormat(metadata.format);
+	const width = result.width;
+	const height = result.pageHeight ?? result.height;
+	return {
+		filePath: outputPath,
+		contentType: output.contentType,
+		contentHash: await hashFileSha256(outputPath),
+		contentLength: result.size,
+		...(width && height ? {width, height} : {}),
+	};
+}
+
+/** Backwards-compatible WebP conversion helper with the established 1920x1080 defaults. */
+export async function processAttachmentImageToWebp(
+	inputPath: string,
+	outputPath: string,
+): Promise<ProcessedAttachmentImage> {
+	const settings = resolveAttachmentWebpSettings();
+	return processAttachmentImage(inputPath, outputPath, {...settings, convertToWebp: true, scaleImages: true});
 }
 
 function normalizeContentType(contentType: string): string {

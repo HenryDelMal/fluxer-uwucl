@@ -31,9 +31,19 @@ import type {GuildResponse} from '@fluxer/schema/src/domains/guild/GuildResponse
 import {getContentTypeFromFilename, isSupportedMediaContentType} from '@pkgs/mime_utils/src/ContentTypeUtils';
 import type {IVirusScanService} from '@pkgs/virus_scan/src/IVirusScanService';
 import {temporaryFile} from 'tempy';
+import {getScaledImageOutputFormat, resolveAttachmentWebpSettings} from '@app/api/infrastructure/AttachmentWebpQuality';
 
 const ATTACHMENT_PROCESSING_CONCURRENCY = 2;
 const METADATA_PROBE_DEGRADED_CONTEXT = 'message_attachment';
+
+function replaceFilenameExtension(filename: string, extension: string): string {
+	const slash = filename.lastIndexOf('/');
+	const dot = filename.lastIndexOf('.');
+	if (dot <= slash) {
+		return `${filename}.${extension}`;
+	}
+	return `${filename.slice(0, dot)}.${extension}`;
+}
 
 interface ProcessAttachmentParams {
 	message: Message;
@@ -53,6 +63,11 @@ interface AttachmentCopyOperation {
 	destinationBucket: string;
 	destinationKey: string;
 	newContentType: string;
+	convertImageToWebp: boolean;
+	scaleImages: boolean;
+	maxWidth: number;
+	maxHeight: number;
+	webpQuality: number;
 }
 
 interface ProcessedAttachment {
@@ -121,6 +136,11 @@ export class AttachmentProcessingService {
 							destinationBucket: result.copyOperation.destinationBucket,
 							destinationKey: result.copyOperation.destinationKey,
 							contentType: result.copyOperation.newContentType,
+							convertImagesToWebp: result.copyOperation.convertImageToWebp,
+							scaleImages: result.copyOperation.scaleImages,
+							maxWidth: result.copyOperation.maxWidth,
+							maxHeight: result.copyOperation.maxHeight,
+							webpQuality: result.copyOperation.webpQuality,
 							...(result.sourceLocalPath ? {sourceLocalPath: result.sourceLocalPath} : {}),
 						}),
 					);
@@ -196,8 +216,16 @@ export class AttachmentProcessingService {
 			throw InputValidationError.fromCode(`attachments.${index}.upload_filename`, ValidationErrorCodes.FILE_NOT_FOUND);
 		}
 		const attachmentId = createAttachmentID(await this.snowflakeService.generate());
-		const cdnKey = makeAttachmentCdnKey(message.channelId, attachmentId, attachment.filename);
 		let contentType = pendingUpload.content_type ?? getContentTypeFromFilename(attachment.filename);
+		const imageSettings = resolveAttachmentWebpSettings();
+		let convertImageToWebp = imageSettings.convertToWebp && isSupportedMediaContentType(contentType) && contentType.toLowerCase().startsWith('image/');
+		let scaleImage = imageSettings.scaleImages && isSupportedMediaContentType(contentType) && contentType.toLowerCase().startsWith('image/');
+		let storedFilename = convertImageToWebp ? replaceFilenameExtension(attachment.filename, 'webp') : attachment.filename;
+		if (scaleImage && !convertImageToWebp) {
+			const scaledFormat = getScaledImageOutputFormat(contentType.slice('image/'.length).replace('jpg', 'jpeg'));
+			storedFilename = replaceFilenameExtension(attachment.filename, scaledFormat.extension);
+		}
+		let cdnKey = makeAttachmentCdnKey(message.channelId, attachmentId, storedFilename);
 		let size = BigInt(uploadedFile.contentLength);
 		const clientFlags =
 			(attachment.flags ?? 0) & (MessageAttachmentFlags.IS_SPOILER | MessageAttachmentFlags.CONTAINS_EXPLICIT_MEDIA);
@@ -263,6 +291,15 @@ export class AttachmentProcessingService {
 					flags |= MessageAttachmentFlags.CONTAINS_EXPLICIT_MEDIA;
 				}
 				nsfw = metadata.nsfw;
+				const isImageContent = isSupportedMediaContentType(contentType) && contentType.toLowerCase().startsWith('image/');
+				convertImageToWebp = imageSettings.convertToWebp && isImageContent;
+				scaleImage = imageSettings.scaleImages && isImageContent;
+				storedFilename = convertImageToWebp
+					? replaceFilenameExtension(attachment.filename, 'webp')
+					: scaleImage
+						? replaceFilenameExtension(attachment.filename, getScaledImageOutputFormat(contentType.slice('image/'.length).replace('jpg', 'jpeg')).extension)
+						: attachment.filename;
+				cdnKey = makeAttachmentCdnKey(message.channelId, attachmentId, storedFilename);
 			}
 		}
 		const needsLocalDownload =
@@ -303,9 +340,9 @@ export class AttachmentProcessingService {
 				return {
 					attachment: {
 						attachment_id: attachmentId,
-						filename: attachment.filename,
+						filename: storedFilename,
 						size,
-						title: attachment.title ?? null,
+						title: attachment.title ?? (storedFilename !== attachment.filename ? attachment.filename : null),
 						description: attachment.description ?? null,
 						height,
 						width,
@@ -323,6 +360,11 @@ export class AttachmentProcessingService {
 						destinationBucket: Config.s3.buckets.cdn,
 						destinationKey: cdnKey,
 						newContentType: contentType,
+						convertImageToWebp,
+						scaleImages: scaleImage,
+						maxWidth: imageSettings.maxWidth,
+						maxHeight: imageSettings.maxHeight,
+						webpQuality: imageSettings.quality,
 					},
 					hasVirusDetected,
 					applyFinalObjectMetadata,
@@ -339,12 +381,13 @@ export class AttachmentProcessingService {
 			}
 			const retainedLocalPath = sourceLocalPath;
 			sourceLocalPath = null;
+			applyFinalObjectMetadata ||= convertImageToWebp || scaleImage;
 			return {
 				attachment: {
 					attachment_id: attachmentId,
-					filename: attachment.filename,
+					filename: storedFilename,
 					size,
-					title: attachment.title ?? null,
+					title: attachment.title ?? (storedFilename !== attachment.filename ? attachment.filename : null),
 					description: attachment.description ?? null,
 					height,
 					width,
@@ -362,6 +405,11 @@ export class AttachmentProcessingService {
 					destinationBucket: Config.s3.buckets.cdn,
 					destinationKey: cdnKey,
 					newContentType: contentType,
+					convertImageToWebp,
+					scaleImages: scaleImage,
+					maxWidth: imageSettings.maxWidth,
+					maxHeight: imageSettings.maxHeight,
+					webpQuality: imageSettings.quality,
 				},
 				hasVirusDetected,
 				applyFinalObjectMetadata,

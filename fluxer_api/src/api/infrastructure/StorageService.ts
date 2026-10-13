@@ -13,7 +13,7 @@ import {
 	StorageObjectListingOverflowError,
 	StorageObjectRangeNotSatisfiableError,
 } from '@app/api/infrastructure/IStorageService';
-import {processMediaFile} from '@app/api/infrastructure/StorageObjectHelpers';
+import {processAttachmentImage, processMediaFile} from '@app/api/infrastructure/StorageObjectHelpers';
 import {Logger} from '@app/api/Logger';
 import {
 	AbortMultipartUploadCommand,
@@ -583,6 +583,11 @@ export class StorageService implements IStorageService {
 		destinationKey,
 		contentType,
 		sourceLocalPath,
+		convertImagesToWebp = false,
+		scaleImages = false,
+		maxWidth = 1920,
+		maxHeight = 1080,
+		webpQuality = 85,
 	}: {
 		sourceBucket: string;
 		sourceKey: string;
@@ -590,6 +595,11 @@ export class StorageService implements IStorageService {
 		destinationKey: string;
 		contentType: string;
 		sourceLocalPath?: string;
+		convertImagesToWebp?: boolean;
+		scaleImages?: boolean;
+		maxWidth?: number;
+		maxHeight?: number;
+		webpQuality?: number;
 	}): Promise<ProcessedStorageObjectMetadata | null> {
 		if (!isSupportedMediaContentType(contentType)) {
 			await this.copyObject({
@@ -607,6 +617,25 @@ export class StorageService implements IStorageService {
 		try {
 			if (ownsDownload) {
 				await this.writeObjectToDisk(sourceBucket, sourceKey, downloadedSource);
+			}
+			if ((convertImagesToWebp || scaleImages) && contentType.toLowerCase().startsWith('image/')) {
+				const processed = await processAttachmentImage(downloadedSource, processedPath, {
+					convertToWebp: convertImagesToWebp, scaleImages, maxWidth, maxHeight, quality: webpQuality,
+				});
+				await this.uploadObjectFromFile({
+					bucket: destinationBucket,
+					key: destinationKey,
+					filePath: processed.filePath,
+					contentType: processed.contentType,
+					contentLength: processed.contentLength,
+				});
+				return {
+					contentType: processed.contentType,
+					contentLength: processed.contentLength,
+					contentHash: processed.contentHash,
+					...(processed.width != null ? {width: processed.width} : {}),
+					...(processed.height != null ? {height: processed.height} : {}),
+				};
 			}
 			const processed = await processMediaFile(downloadedSource, processedPath, contentType).catch((error) => {
 				Logger.error({error, contentType, sourceBucket, sourceKey}, 'Failed to strip attachment media metadata');

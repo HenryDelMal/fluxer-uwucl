@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import {StorageService} from '@app/api/infrastructure/StorageService';
+import sharp from 'sharp';
 import {server} from '@app/api/test/msw/server';
 import {HttpResponse, http} from 'msw';
 import {beforeEach, describe, expect, it} from 'vitest';
@@ -113,6 +114,36 @@ describe('StorageService copies on providers that reject cross-bucket CopyObject
 
 	beforeEach(() => {
 		ceph = cephWithoutCrossBucketCopy();
+	});
+
+	it('stores converted WebP bytes and returns the final dimensions, size and hash', async () => {
+		const body = new Uint8Array(await sharp({create: {width: 2400, height: 1200, channels: 3, background: '#336699'}}).png().toBuffer());
+		ceph.objects.set(`${UPLOADS}/webp-test`, {body, contentType: 'image/png'});
+		const result = await storage().copyObjectWithMetadataStripping({
+			sourceBucket: UPLOADS, sourceKey: 'webp-test', destinationBucket: CDN,
+			destinationKey: 'attachments/1/2/photo.webp', contentType: 'image/png', convertImagesToWebp: true,
+		});
+		const stored = ceph.objects.get(`${CDN}/attachments/1/2/photo.webp`);
+		expect(stored?.contentType).toBe('image/webp');
+		const metadata = await sharp(stored!.body).metadata();
+		expect([metadata.format, metadata.width, metadata.height]).toEqual(['webp', 1920, 960]);
+		expect(result).toMatchObject({contentType: 'image/webp', width: 1920, height: 960, contentLength: stored!.body.length});
+		expect(result?.contentHash).toMatch(/^[a-f0-9]{64}$/u);
+	});
+
+	it('scales an image while preserving PNG when WebP conversion is disabled', async () => {
+		const body = new Uint8Array(await sharp({create: {width: 2400, height: 1200, channels: 3, background: '#336699'}}).png().toBuffer());
+		ceph.objects.set(`${UPLOADS}/scaled-only`, {body, contentType: 'image/png'});
+		const result = await storage().copyObjectWithMetadataStripping({
+			sourceBucket: UPLOADS, sourceKey: 'scaled-only', destinationBucket: CDN,
+			destinationKey: 'attachments/1/2/photo.png', contentType: 'image/png',
+			scaleImages: true, maxWidth: 1280, maxHeight: 720,
+		});
+		const stored = ceph.objects.get(`${CDN}/attachments/1/2/photo.png`);
+		const metadata = await sharp(stored!.body).metadata();
+		expect(stored?.contentType).toBe('image/png');
+		expect([metadata.format, metadata.width, metadata.height]).toEqual(['png', 1280, 640]);
+		expect(result).toMatchObject({contentType: 'image/png', width: 1280, height: 640});
 	});
 
 	it('stores a non-media attachment in the CDN bucket', async () => {

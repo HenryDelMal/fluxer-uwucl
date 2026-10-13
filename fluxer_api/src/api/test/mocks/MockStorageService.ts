@@ -297,6 +297,11 @@ export class MockStorageService implements IStorageService {
 		destinationKey: string;
 		contentType: string;
 		sourceLocalPath?: string;
+		convertImagesToWebp?: boolean;
+		scaleImages?: boolean;
+		maxWidth?: number;
+		maxHeight?: number;
+		webpQuality?: number;
 	}): Promise<ProcessedStorageObjectMetadata | null> {
 		await this.copyObject({
 			sourceBucket: params.sourceBucket,
