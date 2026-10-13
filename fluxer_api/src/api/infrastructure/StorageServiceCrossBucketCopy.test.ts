@@ -121,7 +121,7 @@ describe('StorageService copies on providers that reject cross-bucket CopyObject
 		ceph.objects.set(`${UPLOADS}/webp-test`, {body, contentType: 'image/png'});
 		const result = await storage().copyObjectWithMetadataStripping({
 			sourceBucket: UPLOADS, sourceKey: 'webp-test', destinationBucket: CDN,
-			destinationKey: 'attachments/1/2/photo.webp', contentType: 'image/png', convertImagesToWebp: true,
+			destinationKey: 'attachments/1/2/photo.webp', contentType: 'image/png', convertImagesToWebp: true, scaleImages: true,
 		});
 		const stored = ceph.objects.get(`${CDN}/attachments/1/2/photo.webp`);
 		expect(stored?.contentType).toBe('image/webp');

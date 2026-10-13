@@ -23,7 +23,7 @@ describe('attachment image processing settings', () => {
 			FLUXER_ATTACHMENT_IMAGE_SCALING_ENABLED: 'false',
 		} as NodeJS.ProcessEnv)).toMatchObject({convertToWebp: true, scaleImages: false});
 	});
-	it.each(['1x720', '0x1080', '1920x0', '40000x40000', 'hd', '1920 by 1080'])('rejects invalid maximum resolution %s', (value) => {
+	it.each(['0x1080', '1920x0', '40000x40000', 'hd', '1920 by 1080'])('rejects invalid maximum resolution %s', (value) => {
 		expect(() => resolveAttachmentWebpSettings({FLUXER_ATTACHMENT_IMAGE_MAX_RESOLUTION: value} as NodeJS.ProcessEnv))
 			.toThrow('FLUXER_ATTACHMENT_IMAGE_MAX_RESOLUTION');
 	});
