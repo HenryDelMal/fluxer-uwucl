@@ -250,6 +250,8 @@ Defaults to the derived endpoint. The public Media Proxy URL. The `gifs` service
 
 Defaults to the derived endpoint. The static asset origin. Read by `api`, `worker`, `admin`, and `app-proxy`. When it is unset, `admin` gets the public origin, and every other service derives it itself.
 
+The web app's JavaScript and CSS are built into the `app-proxy` image, which serves them under `/assets/` on the instance's own address whatever this is set to. In the web app, this setting moves only the favicon and the icons used when someone installs the app. To cache the web app's files on a CDN, put the CDN in front of the instance's own hostname. Every file under `/assets/` has a content hash in its name and is sent with a one-year cache lifetime.
+
 #### `FLUXER_ADMIN_ENDPOINT`
 
 Defaults to the derived endpoint. The admin origin. The API accepts exactly this value plus `/oauth2_callback` as the admin OAuth redirect URI. Compose forwards it from `.env`, and builds it from the public origin and `FLUXER_ADMIN_BASE_PATH` when it is unset.
@@ -790,7 +792,7 @@ While email is on, registration checks the address domain. It has to publish an 
 
 #### `FLUXER_EMAIL_FROM_NAME`
 
-`.env.example` empty. The sender name. Default empty. An empty value sends mail under the instance product name, which is the name saved in the admin dashboard or else `FLUXER_APP_PRODUCT_NAME`, and a rename in the dashboard applies to the next email. A set value always wins.
+`.env.example` empty. The sender name. Default empty. An empty value sends mail under the instance product name, which is the name saved in the admin dashboard or else `FLUXER_APP_PRODUCT_NAME`, with the [self-hosted host name rule](#instance-identity-and-branding) applied, and a rename in the dashboard applies to the next email. A set value always wins.
 
 #### `FLUXER_EMAIL_REPLY_TO_EMAIL`
 
@@ -838,6 +840,36 @@ The Save and test button in the admin dashboard, and [Create SMTP test](/admin-a
 The API reads `FLUXER_EMAIL_WEBHOOK_SECRET` for inbound delivery webhooks. `.env.example` lists it commented out.
 
 The API registers `POST /webhooks/sweego` on every deployment. The route authenticates the Standard Webhooks header triple `webhook-id`, `webhook-timestamp`, and `webhook-signature` against that secret, and answers 404 `Email not enabled` while email is off. The route sits outside the client-IP exempt list that covers `/webhooks/livekit`, so give the provider a delivery URL that goes through the edge, `https://chat.example.com/api/webhooks/sweego`.
+
+A second SMTP provider can take the mail for chosen recipient domains while everything else keeps going through the one above. It is off by default. Setting any fallback variable turns it on, and from then on the domains, host, username and password are all required, or startup fails with the name of the one that is missing. The sender, `Reply-To` header and bounced-address check are the same for both providers. Email still has to be on with the main SMTP provider complete, because the fallback never sends on its own. The admin dashboard has no fields for it, and the SMTP test only checks the main provider. Bounce webhooks come only from the provider behind `/webhooks/sweego`, so a hard bounce at the fallback provider does not mark the address as bounced.
+
+#### `FLUXER_EMAIL_FALLBACK_DOMAINS`
+
+Default empty. The recipient domains that go through the fallback provider, comma separated, such as `gmail.com,googlemail.com`. Matching ignores case and takes the part of the address after the last `@`. Only an exact match counts, so `gmail.com` leaves `mail.gmail.com` on the main provider. Set it to `*` alone to send every email through the fallback provider. An entry that is not a bare domain or `*` fails startup. `.env.example` lists it commented out.
+
+#### `FLUXER_EMAIL_FALLBACK_SMTP_HOST`
+
+Default empty. The fallback SMTP host. Required when the domains are set.
+
+#### `FLUXER_EMAIL_FALLBACK_SMTP_PORT`
+
+Default `587`. The fallback SMTP port.
+
+#### `FLUXER_EMAIL_FALLBACK_SMTP_USERNAME`
+
+Default empty. The fallback SMTP login. Required when the domains are set.
+
+#### `FLUXER_EMAIL_FALLBACK_SMTP_PASSWORD`
+
+Default empty. The fallback SMTP password. Required when the domains are set.
+
+#### `FLUXER_EMAIL_FALLBACK_SMTP_TLS_MODE`
+
+Default empty. How the fallback connection is encrypted, with the same four values as `FLUXER_EMAIL_SMTP_TLS_MODE`. An empty value picks `implicit` on port 465 and `starttls` on every other port. A failed send through the fallback is logged as `SMTP send failed` with the fallback host.
+
+#### `FLUXER_EMAIL_FALLBACK_SMTP_HEADERS`
+
+Default empty. Extra headers added to every message sent through the fallback provider, as a JSON object of header name to string value, such as `{"X-Example-Tracking":"off"}` for a provider that reads a header to turn off link tracking. Values are sent exactly as given, never encoded or folded. A name must be a valid header field name, a value must be printable ASCII without line breaks, and each header has to fit on one 998 character line. `From`, `To`, `Cc`, `Bcc`, `Subject`, `Reply-To`, `Message-ID`, `Date`, `Content-Type` and `MIME-Version` cannot be set here. Anything else fails startup with the reason. `.env.example` lists it commented out.
 
 Only `api` and `worker` build the mail service, so recreating those two is enough after a change.
 
@@ -1063,15 +1095,11 @@ With feeds off, Fluxer checks none of this data. The first worker start with fee
 
 #### `FLUXER_REPORT_RETENTION_DAYS`
 
-Default `365`. Read by `worker`. The daily [report retention](/admin-api/reports/#report-retention) job deletes each report this many days after it was filed, pending or resolved, with its evidence copies and search entry, unless a legal hold is in place. Integer 1 to 36500, checked at startup.
-
-#### `FLUXER_RESOLVED_REPORT_RETENTION_DAYS`
-
-Default unset, which leaves resolved reports to `FLUXER_REPORT_RETENTION_DAYS`. Read by `worker`. When set, a resolved report is deleted this many days after it was resolved, if that comes before the end of its retention period. Pending reports are not affected, and a legal hold still keeps a report. Integer 1 to 36500, checked at startup.
+Default `365`. Read by `worker`. The daily [report retention](/admin-api/reports/#report-retention) job deletes each resolved report this many days after it was resolved, with its evidence copies and search entry. Pending reports are kept until they are resolved. A legal hold, a `child_safety` category or a linked enforcement decision can keep a report longer. Integer 1 to 36500, checked at startup.
 
 #### `FLUXER_REPORT_RETENTION_DRY_RUN`
 
-Default `false`. Read by `worker`. With `true`, each run only counts what it would delete and deletes nothing. `true` or `false`, checked at startup. Deleted evidence cannot be restored. Check the counts in the `Processed report retention` log line before the first real run.
+Default `false`. Read by `worker`. With `true`, each run only counts what it would delete or clear and changes nothing. `true` or `false`, checked at startup. Deleted evidence cannot be restored. Check the counts in the `Processed report retention` log line before the first real run.
 
 #### `FLUXER_BREACHED_PASSWORD_CHECK_ENABLED`
 
@@ -1150,11 +1178,11 @@ Set by Docker. Node identity in metrics and logs.
 
 #### `FLUXER_ENV`
 
-Default `development`. The runtime mode. `development`, `production`, or `test`. Compose pins `production`, which gates Postgres validation and the admin cookie flags. On a self-hosted instance, `production` also enforces the [setup token](#setup-token).
+Default `production` when `FLUXER_SELF_HOSTED` is `true`, otherwise `development`. The runtime mode. `development`, `production`, or `test`. Compose pins `production`, which gates Postgres validation and the admin cookie flags. On a self-hosted instance, `production` also enforces the [setup token](#setup-token).
 
 #### `FLUXER_SELF_HOSTED`
 
-Default `false`. The self-host switch. Compose sets `true`. It relaxes the production Postgres SSL requirement, seeds the limit tier, gates registration, donation and discovery controllers, keeps premium billing off until it is set up as [Payments](#payments) describes, turns blocklist feeds off, and keeps hosted-only artwork from `fluxer.app` out of the app, webhook avatars and link embeds.
+Default `false`. The self-host switch. Compose sets `true`. It relaxes the production Postgres SSL requirement, seeds the limit tier, gates registration, donation and discovery controllers, keeps premium billing off until it is set up as [Payments](#payments) describes, turns blocklist feeds off, keeps an account closed for a broken rule for at least 14 days instead of 74 because there is no appeal route, and keeps hosted-only artwork from `fluxer.app` out of the app, webhook avatars and link embeds.
 
 ## Feature flags and development switches
 
@@ -1218,11 +1246,11 @@ Default empty. The YouTube Data API key. Also read by `unfurl`, which accepts `Y
 
 #### `FLUXER_CACHE_PURGE_ADAPTER`
 
-Default `none`. How cached copies of deleted or replaced media are purged. `none` or `http`. Anything else fails startup. With `none`, nothing is queued or sent.
+Default `none`. How cached copies of deleted or replaced media are purged. `none`, `http` or `controller`. Anything else fails startup. With `none`, nothing is queued or sent.
 
 #### `FLUXER_CACHE_PURGE_HTTP_ENDPOINT`
 
-Default empty. Required when the adapter is `http`. Must be an absolute `http` or `https` URL without credentials, or startup fails. While purges are queued, the worker posts JSON `{"exact": [...], "prefix": [...]}` here every 10 seconds. Redirects are not followed. Any 2xx marks the batch done. Your endpoint then purges those URLs from every proxy that caches media. A `400` or `422` makes the worker resend each URL alone, and a URL refused alone moves to the `cache_purge:rejected` key. Any other failure is retried on a later run.
+Default empty. Required when the adapter is `http`. Must be an absolute `http` or `https` URL without credentials, or startup fails. While purges are queued, the worker posts JSON `{"prefixes": [...]}` here every 10 seconds, each a media URL prefix without its scheme. Redirects are not followed. Any 2xx marks the batch done. Your endpoint then purges every cached URL under those prefixes from each proxy that caches media. A `400` or `422` moves the batch to the `cache_purge:rejected` key. Any other failure is retried on a later run.
 
 #### `FLUXER_CACHE_PURGE_HTTP_TOKEN`
 
@@ -1231,6 +1259,18 @@ Default empty. The bearer token sent in the `Authorization` header of each purge
 #### `FLUXER_CACHE_PURGE_HTTP_TIMEOUT_MS`
 
 Default `10000`. Purge request timeout. Accepts 1000 to 10000. The range is checked only when the adapter is `http`.
+
+#### `FLUXER_CACHE_PURGE_CONTROLLER_ENDPOINT`
+
+Default empty. Required when the adapter is `controller`. The purge URL of the Controller edge site that serves your media, in the form `https://<controller host>/v1/orgs/<org id>/sites/<site id>/purge`. Must be an absolute `https` URL without credentials, or startup fails. While purges are queued, the worker posts JSON `{"patterns": [...], "soft": false}` here every 10 seconds, at most 30 patterns per request, each a media URL prefix without its scheme followed by `*`. Any 2xx marks the patterns done. A `400` or `422` moves the batch to the `cache_purge:rejected` key. Any other failure retries the whole batch on a later run.
+
+#### `FLUXER_CACHE_PURGE_CONTROLLER_TOKEN`
+
+Default empty. Required when the adapter is `controller`. The Controller API key, sent as a bearer token. A token with spaces, line breaks or non-ASCII characters fails startup.
+
+#### `FLUXER_CACHE_PURGE_CONTROLLER_TIMEOUT_MS`
+
+Default `10000`. Timeout of each purge request. Accepts 1000 to 10000. The range is checked only when the adapter is `controller`.
 
 #### `FLUXER_GEOIP_DB_PATH`
 
@@ -1247,6 +1287,8 @@ A brand asset on another origin than the instance needs no CSP setting. `app-pro
 #### `FLUXER_APP_PRODUCT_NAME`
 
 Default `Fluxer`. The product name clients display and the API writes in its emails and report flows.
+
+On a self-hosted instance, a name that is empty or `Fluxer` is replaced by the host name of the web app endpoint in everything the server writes: emails and their sender name, system messages and the name of the system user, report flows, enforcement notices, IP block errors, the name of the built-in admin application and donation checkout. Clients keep showing the saved name, except on the network blocked screen, which takes the name from the error. Set a name of your own to use it everywhere.
 
 #### `FLUXER_APP_ICON_URL`
 
@@ -1616,7 +1658,7 @@ Default `60000`. How often discovery is refetched, in milliseconds, and so the l
 
 #### `FLUXER_APP_PROXY_SAME_ORIGIN_HOSTS`
 
-Default empty. Hostnames, comma separated, without a scheme, port or path. When a request's `Host` is in the list, the page bootstrap points the web app and its API at that host, as `https://<host>` and `https://<host>/api`. Every other request gets the discovery values unchanged. Set it when the web app is served on more than one hostname and each hostname routes `/api` to the API. Invalid entries are logged and dropped.
+Default empty. Hostnames, comma separated, without a scheme, port or path. When a request's `Host` is in the list, the page bootstrap points the web app and its API at that host, as `https://<host>` and `https://<host>/api`. The Gateway, media, upload relay and static CDN endpoints move to that host too when discovery puts them on the same host as the API, so `wss://chat.example.com/gateway` becomes `wss://<host>/gateway`. Endpoints on other hosts stay as they are. Every other request gets the discovery values unchanged. Set it when the web app is served on more than one hostname and each hostname routes `/api`, `/gateway` and `/media` like the main one. Invalid entries are logged and dropped.
 
 #### `FLUXER_APP_PROXY_MANIFEST_SCOPE_EXTENSIONS`
 
@@ -1656,7 +1698,7 @@ Defaults to the crate version. The reported build of `admin` and `app-proxy`. `B
 
 `FLUXER_CSP_EXTRA_DEFAULT_SRC`, `FLUXER_CSP_EXTRA_CONNECT_SRC`, `FLUXER_CSP_EXTRA_IMG_SRC`, `FLUXER_CSP_EXTRA_MEDIA_SRC`, `FLUXER_CSP_EXTRA_FONT_SRC`, `FLUXER_CSP_EXTRA_SCRIPT_SRC`, `FLUXER_CSP_EXTRA_STYLE_SRC`, `FLUXER_CSP_EXTRA_FRAME_SRC`, `FLUXER_CSP_EXTRA_WORKER_SRC`, and `FLUXER_CSP_EXTRA_MANIFEST_SRC` take one or more sources separated by commas, spaces, tabs, or newlines. Blank entries and sources the directive already lists are dropped. `FLUXER_CSP_REPORT_URI` sets a single `report-uri` value.
 
-`object-src`, `base-uri`, and `frame-ancestors` are fixed and have no override. `app-proxy` adds the static CDN endpoint and the media endpoint from its environment. The self-hosted image also adds the origin of each branding image to `img-src`. At start it takes them from `FLUXER_APP_ICON_URL`, `FLUXER_APP_SYMBOL_URL`, `FLUXER_APP_LOGO_URL`, `FLUXER_APP_WORDMARK_URL` and `FLUXER_APP_FAVICON_URL`. It then polls the discovery document every `DISCOVERY_REFRESH_INTERVAL_MS`, where a value saved in the admin dashboard wins. A dashboard change reaches the header within a minute by default with no restart. A stack on one hostname needs no extra sources. The usual reason to set one is a voice server on another hostname, which needs its WebSocket origin in `FLUXER_CSP_EXTRA_CONNECT_SRC`. [Voice media does not use the proxy](/operator/reverse-proxy/#voice-media-does-not-use-the-proxy) has that line in place.
+`object-src`, `base-uri`, and `frame-ancestors` are fixed and have no override. `app-proxy` adds the static CDN endpoint and the media endpoint from its environment. The self-hosted image also adds the origin of each branding image to `img-src`. At start it takes them from `FLUXER_APP_ICON_URL`, `FLUXER_APP_SYMBOL_URL`, `FLUXER_APP_LOGO_URL`, `FLUXER_APP_WORDMARK_URL` and `FLUXER_APP_FAVICON_URL`. It then polls the discovery document every `DISCOVERY_REFRESH_INTERVAL_MS`, where a value saved in the admin dashboard wins. A dashboard change reaches the header within a minute by default with no restart. From the same document it adds the origins of the API, gateway, media, upload relay and static CDN endpoints, so a web app served on a second hostname through `FLUXER_APP_ORIGIN_ALIASES` can still reach them. A stack on one hostname needs no extra sources. The usual reason to set one is a voice server on another hostname, which needs its WebSocket origin in `FLUXER_CSP_EXTRA_CONNECT_SRC`. [Voice media does not use the proxy](/operator/reverse-proxy/#voice-media-does-not-use-the-proxy) has that line in place.
 
 A front proxy must not add a [Content-Security-Policy of its own](/operator/reverse-proxy/#send-no-content-security-policy-of-its-own).
 
@@ -1778,7 +1820,7 @@ The admin dashboard at `FLUXER_ADMIN_BASE_PATH` stores these in the database. Th
 
 #### Instance Config, Public App Identity
 
-Product name, client-visible brand assets, the terms, privacy, and community guidelines links, and the setup state in the instance discovery document. No environment variable sets a legal link. On a self-hosted instance, the enforcement emails list only the terms and guidelines links set here, and the clients and report flows show no guidelines link until one is set. Its emails and its IP block errors name no contact address. They tell the reader to contact the administrators of the instance, and no setting adds an address. The emails, the report flows, the IP block errors, the title of an APNs alert that has none, and the built-in admin application use the product name set here, and a rename applies without a restart.
+Product name, client-visible brand assets, the terms, privacy, and community guidelines links, and the setup state in the instance discovery document. No environment variable sets a legal link. On a self-hosted instance, enforcement notices link a rule to the terms or guidelines page set here, without an anchor, and show the rule title alone when no page is set. The clients and report flows show no guidelines link until one is set. Self-hosted emails, enforcement notices and IP block errors name no contact address and no appeal route, and no setting adds one. The emails, the report flows, the IP block errors, the title of an APNs alert that has none, and the built-in admin application use the product name set here, with the [self-hosted host name rule](#instance-identity-and-branding), and a rename applies without a restart.
 
 #### Instance Config, Registration Controls
 

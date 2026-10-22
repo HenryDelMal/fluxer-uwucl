@@ -57,11 +57,12 @@ import {APIErrorCodes} from '@fluxer/constants/src/ApiErrorCodes';
 import {resolveSmtpTlsMode, type SmtpTlsMode, smtpTlsModeFromSecure} from '@fluxer/constants/src/SmtpConstants';
 import {ConflictError} from '@fluxer/errors/src/domains/core/ConflictError';
 import {ServiceUnavailableError} from '@fluxer/errors/src/domains/core/ServiceUnavailableError';
+import {normalizeThemeColor} from '@fluxer/instance_bootstrap/src/ThemeColor';
 import {
 	InstanceConfigResponse,
 	InstanceConfigUpdateRequest,
 	type InstanceEmailSmtpTestRequest,
-	type PendingRegistrationResponse,
+	PendingRegistrationResponse,
 	type RegistrationUrlResponse,
 } from '@fluxer/schema/src/domains/admin/AdminSchemas';
 import {
@@ -412,14 +413,6 @@ function normalizeOptionalString(value: unknown): string | null {
 
 function normalizeOptionalPublicString(value: string | null | undefined, fallback: string | null): string | null {
 	return value === undefined ? fallback : normalizeOptionalString(value);
-}
-
-function normalizeThemeColor(value: unknown): string | null {
-	const match = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(normalizeOptionalString(value) ?? '');
-	if (match === null) return null;
-	const digits = match[1].toLowerCase();
-	const color = `#${digits.length === 3 ? digits.replace(/./g, '$&$&') : digits}`;
-	return color === '#000000' ? null : color;
 }
 
 function getDefaultPremiumProductName(): string {
@@ -1053,7 +1046,6 @@ function parseStoredRegistrationConfig(raw: string | null): InstanceRegistration
 }
 
 const RegistrationUrlSchema = InstanceConfigResponse.shape.registration.shape.urls.element;
-const PendingRegistrationSchema = InstanceConfigResponse.shape.registration.shape.pending_registrations.element;
 const StoredRegistrationTimestampSchema = z.iso
 	.datetime({offset: true})
 	.refine((value) => value === value.trim() && Number.isFinite(Date.parse(value)))
@@ -1086,14 +1078,15 @@ const StoredRegistrationUrlSchema = RegistrationUrlSchema.extend({
 	last_used_at: StoredRegistrationTimestampSchema.nullable().default(null),
 	last_used_by_user_id: StoredNullableStringSchema.pipe(StoredSnowflakeStringSchema.nullable()),
 }) satisfies z.ZodType<InstanceRegistrationUrl>;
-const StoredPendingRegistrationSchema = PendingRegistrationSchema.extend({
+const StoredPendingRegistrationSchema = PendingRegistrationResponse.extend({
 	user_id: StoredSnowflakeStringSchema,
-	discriminator: PendingRegistrationSchema.shape.discriminator.default(0),
+	discriminator: PendingRegistrationResponse.shape.discriminator.default(0),
 	global_name: StoredNullableStringSchema,
 	email: StoredNullableStringSchema,
 	requested_at: StoredRegistrationTimestampSchema,
 	registration_url_id: StoredNullableStringSchema.pipe(StoredRegistrationUrlIdSchema.nullable()),
 	client_ip: StoredNullableStringSchema,
+	invite_code: StoredNullableStringSchema,
 }) satisfies z.ZodType<InstancePendingRegistration>;
 
 function isRegistrationUrlUsable(registrationUrl: InstanceRegistrationUrl, now: Date): boolean {

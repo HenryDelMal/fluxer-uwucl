@@ -270,6 +270,21 @@ describe('runtimeSnapshotFromDiscovery', () => {
 		).toThrow(/appPublic\.branding\.icon_url/u);
 	});
 
+	test('treats a black or malformed theme colour as unset and normalises the rest', () => {
+		const snapshot = runtimeSnapshotFromDiscovery(parsedDocument('t.test'));
+		const themeColorOf = (theme_color: unknown) =>
+			requireRuntimeConfigSnapshot({
+				...snapshot,
+				appPublic: {...snapshot.appPublic, branding: {...snapshot.appPublic.branding, theme_color}},
+			}).appPublic.branding.theme_color;
+		for (const unset of ['#000000', '#000', '000000', '', 'rgb(1, 2, 3)', 'rebeccapurple', 0, null]) {
+			expect(themeColorOf(unset)).toBeNull();
+		}
+		expect(themeColorOf('#FF0000')).toBe('#ff0000');
+		expect(themeColorOf(' f00 ')).toBe('#ff0000');
+		expect(themeColorOf('#000001')).toBe('#000001');
+	});
+
 	test('carries the advertised domain migration', () => {
 		const domainMigration = {
 			enabled: true,
@@ -463,6 +478,28 @@ describe('InstanceSnapshotStore.resolve on an official web page', () => {
 		const resolution = await InstanceSnapshotStore.resolve({input: 'https://alias.example.test', signal: null});
 		expect(resolution.snapshot.apiEndpoint).toBe('https://alias.example.test/api');
 		expect(resolution.snapshot.webAppEndpoint).toBe('https://alias.example.test');
+	});
+
+	test('an alias host also takes over the gateway and media the canonical host serves', async () => {
+		stubBrowserDocument('https://gateway-alias.example.test', {servesOwnApi: true});
+		const canonical = discoveryDocument('canonical.example.test');
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () =>
+				jsonResponse({
+					...canonical,
+					endpoints: {
+						...canonical.endpoints,
+						gateway: 'wss://canonical.example.test/gateway',
+						media: 'https://canonical.example.test/media',
+					},
+				}),
+			),
+		);
+		const resolution = await InstanceSnapshotStore.resolve({input: 'https://gateway-alias.example.test', signal: null});
+		expect(resolution.snapshot.gatewayEndpoint).toBe('wss://gateway-alias.example.test/gateway');
+		expect(resolution.snapshot.mediaEndpoint).toBe('https://gateway-alias.example.test/media');
+		expect(resolution.snapshot.staticCdnEndpoint).toBe('https://cdn.canonical.example.test');
 	});
 
 	test('a host that is not marked as serving its own API still refuses a foreign API declaration', async () => {
